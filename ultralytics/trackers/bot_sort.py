@@ -1,7 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
 from collections import deque
-
+import torch
 import numpy as np
 
 from .basetrack import TrackState
@@ -190,6 +190,14 @@ class BOTSORT(BYTETracker):
         self.appearance_thresh = args.appearance_thresh
 
         if args.with_reid:
+            from torchreid.reid.utils import FeatureExtractor
+            self.encoder = FeatureExtractor(
+                model_name=args.reid_model_name,
+                model_path=args.reid_model_path,
+                pixel_mean=[0.5],
+                pixel_std = [0.5],
+            )
+        else:
             # Haven't supported BoT-SORT(reid) yet
             self.encoder = None
         self.gmc = GMC(method=args.gmc_method)
@@ -202,8 +210,30 @@ class BOTSORT(BYTETracker):
         """Initialize object tracks using detection bounding boxes, scores, class labels, and optional ReID features."""
         if len(dets) == 0:
             return []
+        #TODO: multiple objects
         if self.args.with_reid and self.encoder is not None:
-            features_keep = self.encoder.inference(img, dets)
+            # Initialize an empty list to store features
+            features_list = []
+
+            # Iterate over each detection in dets
+            for det in dets:
+                # Extract xywh values for the current detection
+                x, y, width, height = det[0], det[1], det[2], det[3]
+                
+                # Ensure coordinates are in integers (to avoid indexing issues)
+                x, y, width, height = map(int, [x, y, width, height])
+                
+                # Ensure the image is in (C, H, W) format
+                img_ = np.transpose(img, (2, 0, 1))
+                
+                # Crop the image based on xywh
+                cropped_image = img_[:, y:y+height, x:x+width]
+                
+                # Encode the cropped image and append the result
+                feature = self.encoder([np.transpose(cropped_image, (1, 2, 0))]).cpu().numpy()
+                features_list.append(feature)
+            
+            features_keep = np.array(features_list) #np.array(features_list).squeeze()
             return [BOTrack(xyxy, s, c, f) for (xyxy, s, c, f) in zip(dets, scores, cls, features_keep)]  # detections
         else:
             return [BOTrack(xyxy, s, c) for (xyxy, s, c) in zip(dets, scores, cls)]  # detections
@@ -218,9 +248,13 @@ class BOTSORT(BYTETracker):
 
         if self.args.with_reid and self.encoder is not None:
             emb_dists = matching.embedding_distance(tracks, detections) / 2.0
+            print("emb_dists: ",emb_dists)
             emb_dists[emb_dists > self.appearance_thresh] = 1.0
-            emb_dists[dists_mask] = 1.0
+            print("dists: ",emb_dists)
+            #NOTE: Need to check this
+            # emb_dists[dists_mask] = 1.0
             dists = np.minimum(dists, emb_dists)
+            
         return dists
 
     def multi_predict(self, tracks):
