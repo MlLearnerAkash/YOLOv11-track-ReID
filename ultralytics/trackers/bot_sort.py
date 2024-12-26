@@ -252,7 +252,8 @@ class BOTSORT(BYTETracker):
             emb_dists[emb_dists > self.appearance_thresh] = 1.0
             print("dists: ",emb_dists)
             #NOTE: Need to check this
-            # emb_dists[dists_mask] = 1.0
+            emb_dists[dists_mask] = 0.7
+
             dists = np.minimum(dists, emb_dists)
             
         return dists

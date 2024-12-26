@@ -1,9 +1,28 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 # Default YOLO tracker settings for BoT-SORT tracker https://github.com/NirAharon/BoT-SORT
 
+# tracker_type: botsort # tracker type, ['botsort', 'bytetrack']
+# track_high_thresh: 0.55 # threshold for the first association
+# track_low_thresh: 0.25 # threshold for the second association
+# new_track_thresh: 0.75 # threshold for init new track if the detection does not match any tracks
+# track_buffer: 360 # buffer to calculate the time when to remove tracks
+# match_thresh: 0.95 # threshold for matching tracks
+# fuse_score: True # Whether to fuse confidence scores with the iou distances before matching
+# min_box_area: 10  # threshold for min box areas(for tracker evaluation, not used for now)
+
+# # BoT-SORT settings
+# gmc_method: sparseOptFlow # method of global motion compensation
+# # ReID model related thresh (not supported yet)
+# proximity_thresh: 0.25
+# appearance_thresh: 0.25
+# with_reid: True
+# reid_model_name: osnet_ain_x0_25
+# reid_model_path: /root/ws/ultralytics/weights/osnet_ibn_x1_0_imagenet.pth
+
+#needdle
 tracker_type: botsort # tracker type, ['botsort', 'bytetrack']
-track_high_thresh: 0.25 # threshold for the first association
-track_low_thresh: 0.1 # threshold for the second association
+track_high_thresh: 0.05 # threshold for the first association
+track_low_thresh: 0.02 # threshold for the second association
 new_track_thresh: 0.75 # threshold for init new track if the detection does not match any tracks
 track_buffer: 360 # buffer to calculate the time when to remove tracks
 match_thresh: 0.95 # threshold for matching tracks
@@ -13,10 +32,10 @@ min_box_area: 10  # threshold for min box areas(for tracker evaluation, not used
 # BoT-SORT settings
 gmc_method: sparseOptFlow # method of global motion compensation
 # ReID model related thresh (not supported yet)
-proximity_thresh: 0.95
-appearance_thresh: 0.005
-with_reid: True
-reid_model_name: resnet101
+proximity_thresh: 0.25
+appearance_thresh: 0.25
+with_reid: False
+reid_model_name: osnet_ain_x0_25
 reid_model_path: /root/ws/ultralytics/weights/osnet_ibn_x1_0_imagenet.pth
 
 

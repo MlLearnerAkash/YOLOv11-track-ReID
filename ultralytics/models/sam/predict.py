@@ -899,6 +899,7 @@ class SAM2VideoPredictor(SAM2Predictor):
         masks = self.prompts.pop("masks", masks)
 
         frame = self.dataset.frame
+
         self.inference_state["im"] = im
         output_dict = self.inference_state["output_dict"]
         if len(output_dict["cond_frame_outputs"]) == 0:  # initialize prompts
@@ -909,6 +910,20 @@ class SAM2VideoPredictor(SAM2Predictor):
             elif masks is not None:
                 for i in range(len(masks)):
                     self.add_new_prompts(obj_id=i, masks=masks[[i]], frame_idx=frame)
+        # --- Add prompt at frame 30 ---
+        # if frame == 30:
+        #     new_points, new_labels, _ = self._prepare_prompts(im.shape[2:],  # Assuming you want to add points at frame 30
+        #                                                     bboxes=[100, 100, 200, 200],  # Example bbox, replace with your desired prompt
+        #                                                     points=None, 
+        #                                                     labels=None, 
+        #                                                     masks=None) 
+        #     if new_points is not None:
+        #         for i in range(len(new_points)):
+        #             # Assign a new object ID (e.g., starting from the last used ID)
+        #             new_obj_id = len(self.inference_state["obj_idx_to_id"])  
+        #             self.add_another_prompts(obj_id=0, points=new_points[[i]], labels=new_labels[[i]], frame_idx=frame)
+        # # --- End of prompt addition ---
+
         self.propagate_in_video_preflight()
 
         consolidated_frame_inds = self.inference_state["consolidated_frame_inds"]
@@ -1073,6 +1088,107 @@ class SAM2VideoPredictor(SAM2Predictor):
         )
         pred_masks = consolidated_out["pred_masks"].flatten(0, 1)
         return pred_masks.flatten(0, 1), torch.ones(1, dtype=pred_masks.dtype, device=pred_masks.device)
+
+    @smart_inference_mode()
+    def add_another_prompts(
+        self,
+        obj_id,
+        points=None,
+        labels=None,
+        masks=None,
+        frame_idx=0,
+    ):
+        """
+        Adds new points or masks to a specific frame for a given object ID.
+
+        This method updates the inference state with new prompts (points or masks) for a specified
+        object and frame index. It ensures that the prompts are either points or masks, but not both,
+        and updates the internal state accordingly. It also handles the generation of new segmentations
+        based on the provided prompts and the existing state.
+
+        Args:
+            obj_id (int): The ID of the object to which the prompts are associated.
+            points (torch.Tensor, Optional): The coordinates of the points of interest. Defaults to None.
+            labels (torch.Tensor, Optional): The labels corresponding to the points. Defaults to None.
+            masks (torch.Tensor, optional): Binary masks for the object. Defaults to None.
+            frame_idx (int, optional): The index of the frame to which the prompts are applied. Defaults to 0.
+
+        Returns:
+            (tuple): A tuple containing the flattened predicted masks and a tensor of ones indicating the number of objects.
+
+        Raises:
+            AssertionError: If both `masks` and `points` are provided, or neither is provided.
+
+        Note:
+            - Only one type of prompt (either points or masks) can be added per call.
+            - If the frame is being tracked for the first time, it is treated as an initial conditioning frame.
+            - The method handles the consolidation of outputs and resizing of masks to the original video resolution.
+        """
+        assert (masks is None) ^ (points is None), "'masks' and 'points' prompts are not compatible with each other."
+        obj_idx = self._obj_id_to_idx(obj_id)
+
+        point_inputs = None
+        pop_key = "point_inputs_per_obj"
+        if points is not None:
+            point_inputs = {"point_coords": points, "point_labels": labels}
+            self.inference_state["point_inputs_per_obj"][obj_idx][frame_idx] = point_inputs
+            pop_key = "mask_inputs_per_obj"
+        self.inference_state["mask_inputs_per_obj"][obj_idx][frame_idx] = masks
+        self.inference_state[pop_key][obj_idx].pop(frame_idx, None)
+        # If this frame hasn't been tracked before, we treat it as an initial conditioning
+        # frame, meaning that the inputs points are to generate segments on this frame without
+        # using any memory from other frames, like in SAM. Otherwise (if it has been tracked),
+        # the input points will be used to correct the already tracked masks.
+        is_init_cond_frame = frame_idx in self.inference_state["frames_already_tracked"]
+        obj_output_dict = self.inference_state["output_dict_per_obj"][obj_idx]
+        obj_temp_output_dict = self.inference_state["temp_output_dict_per_obj"][obj_idx]
+        # Add a frame to conditioning output if it's an initial conditioning frame or
+        # if the model sees all frames receiving clicks/mask as conditioning frames.
+        storage_key = "cond_frame_outputs" if is_init_cond_frame else "non_cond_frame_outputs"
+
+        # Get any previously predicted mask logits on this object and feed it along with
+        # the new clicks into the SAM mask decoder.
+        prev_sam_mask_logits = None
+        # lookup temporary output dict first, which contains the most recent output
+        # (if not found, then lookup conditioning and non-conditioning frame output)
+        if point_inputs is not None:
+            prev_out = (
+                obj_temp_output_dict[storage_key].get(frame_idx)
+                or obj_output_dict["cond_frame_outputs"].get(frame_idx)
+                or obj_output_dict["non_cond_frame_outputs"].get(frame_idx)
+            )
+
+            if prev_out is not None and prev_out.get("pred_masks") is not None:
+                prev_sam_mask_logits = prev_out["pred_masks"].to(device=self.device, non_blocking=True)
+                # Clamp the scale of prev_sam_mask_logits to avoid rare numerical issues.
+                prev_sam_mask_logits.clamp_(-32.0, 32.0)
+        current_out = self._run_single_frame_inference(
+            output_dict=obj_output_dict,  # run on the slice of a single object
+            frame_idx=frame_idx,
+            batch_size=1,  # run on the slice of a single object
+            is_init_cond_frame=is_init_cond_frame,
+            point_inputs=point_inputs,
+            mask_inputs=masks,
+            reverse=False,
+            # Skip the memory encoder when adding clicks or mask. We execute the memory encoder
+            # at the beginning of `propagate_in_video` (after user finalize their clicks). This
+            # allows us to enforce non-overlapping constraints on all objects before encoding
+            # them into memory.
+            run_mem_encoder=False,
+            prev_sam_mask_logits=prev_sam_mask_logits,
+        )
+        # Add the output to the output dict (to be used as future memory)
+        obj_temp_output_dict[storage_key][frame_idx] = current_out
+
+        # Resize the output mask to the original video resolution
+        consolidated_out = self._consolidate_temp_output_across_obj(
+            frame_idx,
+            is_cond=is_init_cond_frame,
+            run_mem_encoder=False,
+        )
+        pred_masks = consolidated_out["pred_masks"].flatten(0, 1)
+        return pred_masks.flatten(0, 1), torch.ones(1, dtype=pred_masks.dtype, device=pred_masks.device)
+
 
     @smart_inference_mode()
     def propagate_in_video_preflight(self):
