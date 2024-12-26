@@ -110,23 +110,24 @@ if not ret:
     raise Exception("Unable to read the first frame from the video.")
     
 print("Select the point from the first frame (0 seconds):")
-start_point = get_point_from_click(first_frame, "Select a Point (Start Frame)")
+# start_point = get_point_from_click(first_frame, "Select a Point (Start Frame)")
 
 # Get the point selected from the 7-second frame
 print("Select the point from the 7-second frame:")
-seven_second_frame = get_frame_at_time(video_path, 7)
-selected_point_7sec = get_point_from_click(seven_second_frame, "Select a Point (7 Seconds)")
+# seven_second_frame = get_frame_at_time(video_path, 7)
+# selected_point_7sec = get_point_from_click(seven_second_frame, "Select a Point (7 Seconds)")
 
 # If both points are selected, proceed with the predictor
-if start_point and selected_point_7sec:
-    print(f"Selected points: Start Frame: {start_point}, 7-Second Frame: {selected_point_7sec}")
+if True :#and selected_point_7sec
+    # print(f"Selected points: Start Frame: {start_point}, 7-Second Frame: {selected_point_7sec}")
     
     # Create SAM2VideoPredictor
     overrides = dict(conf=0.25, task="segment", mode="predict", imgsz=1024, model="sam2.1_l.pt")
     predictor = SAM2VideoPredictor(overrides=overrides, samurai=True)
 
     # Run inference using the selected points
-    results = predictor(source=video_path, points=[start_point, selected_point_7sec], labels=[1, 1])
+    # results = predictor(source=video_path, points=[start_point, selected_point_7sec], labels=[1, 1])
+    results = predictor(source=video_path, points=[[620, 1103]], labels=[1])
     print("Inference completed.")
 else:
     print("No points were selected.")

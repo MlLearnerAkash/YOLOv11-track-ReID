@@ -148,7 +148,7 @@ def run(
             break
 
         # Perform object tracking with YOLO, filtering by specified classes
-        tracks = model.track(im0, persist=True, conf=0.55,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml", classes= [1])#, 
+        tracks = model.track(im0, persist=True, conf=0.05,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml",classes=[14])#, 
         # Count objects in the current frame using the ObjectCounter
         im0, item_status = counter.start_counting(im0, tracks)
         
