@@ -58,6 +58,12 @@
 # cv2.destroyAllWindows()
 
 
+'''
+{0: 'clamp', 1: 'sponge', 2: 'gauze', 3: 'glove', 4: 'snare', 5: 'incision', 6: 'forceps', 
+7: 'obstruction', 8: 'vesiloop', 9: 'sucker', 10: 'black_suture', 11: 'scissors', 12: 'bovie', 13: 
+'woodspack', 14: 'needle', 15: 'needle_holder', 16: 'woods_pack', 17: 'scalpel'}
+'''
+
 import argparse
 from pathlib import Path
 
@@ -76,6 +82,43 @@ def mouse_callback(event, x, y, flags, param):
     """Mouse event callback for manipulating regions."""
     pass  # Keep the mouse callback if required later
 
+def is_point_in_rectangle(rect_coords, point_coords):
+    """
+    Checks if a point is inside a rectangle defined by four corner coordinates.
+
+    Args:
+        rect_coords: A list of four coordinates representing the rectangle corners 
+                    in any order: [(x1, y1), (x2, y2), (x3, y3), (x4, y4)].
+        point_coords: A tuple representing the point coordinates (x, y).
+
+    Returns:
+        True if the point is inside the rectangle, False otherwise.
+    """
+
+    # Extract x and y coordinates from rectangle corners
+    x_coords = [x for x, y in rect_coords]
+    y_coords = [y for x, y in rect_coords]
+
+    # Calculate min and max x and y
+    min_x = min(x_coords)
+    max_x = max(x_coords)
+    min_y = min(y_coords)
+    max_y = max(y_coords)
+
+    x, y = point_coords[0]
+
+    # Check if the point is within the bounds
+    return min_x <= x <= max_x and min_y <= y <= max_y
+
+max_in_value = float('-inf')  # Initialize to negative infinity to ensure it works for any number
+max_out_value = float('-inf')  # Initialize to negative infinity to ensure it works for any number'
+# Function to update the maximum value
+def update_in_max(value):
+    global max_in_value
+    max_in_value = max(max_in_value, value)  # Update max_value if value is greater
+def update_out_max(value):
+    global max_out_value
+    max_out_value = max(max_out_value, value)  # Update max_value if value is greater
 
 def run(
     weights="/root/ws/med_si_track/custom_needle_large/large/weights/best.pt",
@@ -141,21 +184,56 @@ def run(
 
     # Process video frame-by-frame
     i= 0
+    
     while cap.isOpened():
         success, im0 = cap.read()
         if not success:
             print("Video frame is empty or video processing has completed.")
             break
-
+        global_in_count = 0
+        global_out_count = 0
         # Perform object tracking with YOLO, filtering by specified classes
-        tracks = model.track(im0, persist=True, conf=0.05,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml",classes=[14])#, 
+        tracks = model.track(im0, persist=True, conf=0.55,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml",classes=[1])#, 
+        # Convert bounding boxes to center points
+        # if tracks[0]:
+        #     for k in range(len(tracks[0].boxes.xyxy)):
+        #         center_points = [(int((x1 + x2) / 2), int((y1 + y2) / 2)) for x1, y1, x2, y2 in tracks[0].boxes[k].xyxy]
+        #         # Check if any center point is inside the rectangle
+        #         if is_point_in_rectangle(line_points, center_points):
+        #             # Increment the count for objects entering the rectangle
+        #             global_in_count += 1
+        #             update_in_max(global_in_count)
+
+        #         else:
+        #             # Increment the count for objects entering the rectangle
+        #             global_out_count += 1
+        #             # print(f"Object entered the rectangle. Total count: {global_out_count}")
+        #             # out_current_status = max(out, global_out_count)
+        #             update_out_max(global_out_count)
+        # # print(f"Total objects entered the rectangle: {global_in_count}")
+        # # 
+        # try:
+        #     print(f">>>>>>>>>>Numbe of Sponges inside incision {max_in_value}")
+        #     print(f">>>>>>>>>>Numbe of Sponges outside incision: {max_out_value}")
+        # except:
+        #     pass
         # Count objects in the current frame using the ObjectCounter
         im0, item_status = counter.start_counting(im0, tracks)
-        
+        print(">>>>>", item_status)
+        item_status_global= {}
+        for item_num in range(len(item_status)):
+            item_name= item_status[item_num]["class_name"]
+            if item_name not in item_status_global.keys():
+                item_status_global[item_name] = []
+                
+            item_status_global[item_name].append({"name": f"{item_name}#{item_num}", "status": f"{item_status[item_num]['is_inside']}"})
+
+        print(">>>>>>",item_status_global)    
+         
         # Write the updated all_item_status to a JSON file
         with open(f"/root/ws/ultralytics/gui_data/item_{i}_status.json", "w") as f:
-            json.dump(item_status, f, indent=4)
-        print(item_status)
+            #TODO: Add the "item_status" to the JSON file
+            json.dump(item_status_global, f, indent=4)
 
         #writting the image
         cv2.imwrite(f"/root/ws/ultralytics/gui_data/item_{i}_status.jpg", im0)
