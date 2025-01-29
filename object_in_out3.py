@@ -197,10 +197,10 @@ def run(
     prev_tracks = {}  # To store persistent tracking info
     current_object_numbers = {}  # To track contiguous numbers for each class
     id_switch_map = {}  # To track ID switches
-    global_map = {0:{'glove':[], 'sponge':[]}, 1:{'glove':[], 'sponge':[]}}  # To store global IDs
+    global_map = {0:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}, 1:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}}  # To store global IDs
     max_det_ = {}
-    max_in_det = {"glove":0, "sponge":0}
-    class_names = ["glove", "sponge"]
+    max_in_det = {"glove":0, "sponge":0, "woodspack":0, "gauze":0, "needle":0}
+    class_names = ["glove", "sponge", "woodspack","gauze", "needle"]
     while cap.isOpened():
         
         success, im0 = cap.read()
@@ -212,7 +212,7 @@ def run(
         
 
         # Perform object tracking
-        tracks = model.track(im0, persist=True, conf=0.55, iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml", classes=[1, 3])
+        tracks = model.track(im0, persist=True, conf=0.55, iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml", classes=[1,2,3,13,14])
         im, im_status = counter.start_counting(im0, tracks)
         i += 1
         if not im_status or len(im_status[0]) == 0:
@@ -288,7 +288,13 @@ def run(
         if 'glove' not in global_map[i].keys() and i>=1:
             global_map[i]["glove"] = global_map[i-1]["glove"] 
         if 'sponge' not in global_map[i].keys() and i>=1:
-            global_map[i]["sponge"] = global_map[i-1]["sponge"] 
+            global_map[i]["sponge"] = global_map[i-1]["sponge"]
+        if 'gauze' not in global_map[i].keys() and i>=1:
+            global_map[i]["gauze"] = global_map[i-1]["gauze"]
+        if 'woodspack' not in global_map[i].keys() and i>=1:
+            global_map[i]["woodspack"] = global_map[i-1]["woodspack"]
+        if 'needle' not in global_map[i].keys() and i>=1:
+            global_map[i]["needle"] = global_map[i-1]["needle"]
 
         print("Before:",global_map[i])
         global_map[i] = filter_pred(global_map[i], global_map[i-1])

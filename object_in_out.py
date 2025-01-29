@@ -193,7 +193,7 @@ def run(
         global_in_count = 0
         global_out_count = 0
         # Perform object tracking with YOLO, filtering by specified classes
-        tracks = model.track(im0, persist=True, conf=0.55,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml",classes=[1])#, 
+        tracks = model.track(im0, persist=True, conf=0.55,iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml")#, 
         # Convert bounding boxes to center points
         # if tracks[0]:
         #     for k in range(len(tracks[0].boxes.xyxy)):
