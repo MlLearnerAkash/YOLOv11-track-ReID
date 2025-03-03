@@ -1,12 +1,14 @@
 import argparse
 from pathlib import Path
 import cv2
+from collections import OrderedDict
 import numpy as np
 from shapely.geometry import Polygon
 import json
 from ultralytics import YOLO, solutions
 from ultralytics.utils.files import increment_path
-
+import sys
+import copy
 #NOTE: v01
 # def filter_pred(preds):
 #     cleaned_data = {}
@@ -48,6 +50,67 @@ from ultralytics.utils.files import increment_path
 
 #         cleaned_data[class_name] = list(id_map.values())
 #     return cleaned_data
+
+def sort_data_keys(json_obj):
+    """
+    Sorts the keys within the "data" field of the input JSON object alphabetically.
+    
+    Parameters:
+        json_obj (dict): A dictionary with a "data" key containing a dictionary.
+        
+    Returns:
+        dict: A new dictionary with the "data" keys sorted alphabetically.
+    """
+    if "data" in json_obj and isinstance(json_obj["data"], dict):
+        # Using OrderedDict to maintain sorted order explicitly.
+        sorted_data = OrderedDict(sorted(json_obj["data"].items()))
+        
+        json_obj["data"] = sorted_data
+    return json_obj
+
+def find_repetitive_values(data):
+    value_to_keys = {}  # Dictionary to map values to the keys they appear in
+    repetitive_values = {}  # Store values that appear in multiple keys
+
+    for key, values in data.items():
+        for value in values:
+            if value in value_to_keys:
+                value_to_keys[value].append(key)
+                repetitive_values[value] = value_to_keys[value]  # Store only if repeated
+            else:
+                value_to_keys[value] = [key]
+
+    return repetitive_values if repetitive_values else None
+
+def id_switch_adjustment(global_map, local_map):
+    key_ids_global_map = {}
+    key_ids_local_map = {}
+    for key, values in global_map.items():
+        x = []
+        for i in values:
+            x.append(i["id"])
+        key_ids_global_map[key] = x
+    for key, values in local_map.items():
+        y = []
+        for i in values:
+            y.append(i["id"])
+        key_ids_local_map[key] = y
+
+    repeated_ids = find_repetitive_values(key_ids_global_map)
+    if repeated_ids:
+        print("//////////////////", repeated_ids)
+        for key, values in repeated_ids.items():
+            for value in values:
+                try:
+                    if key not in key_ids_local_map[value]:
+                        global_map[value] = [item for item in global_map[value] if item["id"] != key]
+                except:
+                    pass
+    print(global_map)
+    return global_map
+
+
+
 def filter_pred(preds, press):
     cleaned_data = {}
 
@@ -127,7 +190,22 @@ def update_max_det(max_det,current_status):
     
     mod_max_det = configure_dict(mod_max_det)
     return mod_max_det
+
     
+def draw_red_dot(image, bbox):
+    """
+    Draws a red dot at the center of the bounding box.
+    
+    Args:
+        image: The input image.
+        bbox: Bounding box coordinates (x1, y1, x2, y2).
+    """
+    center_x = (bbox[0] + bbox[2]) // 2
+    center_y = (bbox[1] + bbox[3]) // 2
+    cv2.circle(image, (int(center_x), int(center_y)), 20, (0, 0, 255), -1)  # Red dot
+    cv2.rectangle(image, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (243, 150, 33), thickness=3)
+
+    return image   
     
 
 
@@ -175,14 +253,14 @@ def run(
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS))
     
     # Define ROI points
-    line_points = [(750, 1040), (750, 1740), (1490, 1740), (1490, 1040)]
+    line_points = [(800, 1280), (800, 1870), (1400, 1870), (1400, 1280)]#(500, 1680), (500, 1970), (710, 1970), (710, 1680)
     
     # Initialize ObjectCounter from ultralytics.solutions
     counter = solutions.ObjectCounter(
         view_img=view_img,
         reg_pts=line_points,
         classes_names=model.names,
-        draw_tracks=True,
+        draw_tracks=False,
         line_thickness=line_thickness
     )
 
@@ -197,10 +275,55 @@ def run(
     prev_tracks = {}  # To store persistent tracking info
     current_object_numbers = {}  # To track contiguous numbers for each class
     id_switch_map = {}  # To track ID switches
-    global_map = {0:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}, 1:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}}  # To store global IDs
+    global_map = {
+        0: {
+        # 'glove': [],
+        # 'sponge': [],
+        # 'woodspack': [],
+        # 'gauze': [],
+        'needle': [],
+        # 'black_suture': [],
+        # 'vesiloop': [],
+        # 'needle_holder': [],
+        # 'sucker': [],
+        # 'clamp': [],
+        'forceps': [],
+        # 'scissors': [],
+        # 'bovie': [],
+        # 'scalpel': []
+    },
+    1: {
+        # 'glove': [],
+        # 'sponge': [],
+        # 'woodspack': [],
+        # 'gauze': [],
+        'needle': [],
+        # 'black_suture': [],
+        # 'vesiloop': [],
+        # 'needle_holder': [],
+        # 'sucker': [],
+        # 'clamp': [],
+        'forceps': [],
+        # 'scissors': [],
+        # 'bovie': [],
+        # 'scalpel': []
+        }
+    }#{0:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}, 1:{'glove':[], 'sponge':[], 'woodspack':[], 'gauze':[], 'needle':[]}}  # To store global IDs
     max_det_ = {}
-    max_in_det = {"glove":0, "sponge":0, "woodspack":0, "gauze":0, "needle":0}
-    class_names = ["glove", "sponge", "woodspack","gauze", "needle"]
+    # max_in_det = { "sponge":0, "woodspack":0, "gauze":0, 
+    #               "needle":0,   
+    #               "needle_holder":0, "forceps":0, 
+    #              }
+    max_in_det = {"gauze":0, 
+                   
+                  "needle":0, "forceps":0, 
+                 }
+    # class_names = ["sponge", "woodspack","gauze", 
+    #                "needle", "needle_holder", "forceps", 
+    #                ]
+    class_names = ["gauze", 
+                   "needle", "forceps", 
+                   ]
     while cap.isOpened():
         
         success, im0 = cap.read()
@@ -209,18 +332,24 @@ def run(
             break
         # print(f">>>>>>>>>global_map: {global_map}")
 
+        # print(f"size of an image is: {sys.getsizeof(im0)}")
+
         
 
         # Perform object tracking
-        tracks = model.track(im0, persist=True, conf=0.55, iou=0.25, show=False, imgsz=2496, tracker="botsort.yaml", classes=[1,2,3,13,14])
-        im, im_status = counter.start_counting(im0, tracks)
+        tracks = model.track(im0, persist=True, conf=0.05, iou=0.005, show=False, imgsz=2496, tracker="botsort.yaml", classes=[6,14])#[1,5,11,13,9]
+        im, im_status = counter.start_counting(im0, tracks )
+
+        im = cv2.rectangle(im, (500,900), (1600,2000), (0,255,255), 5) ###(600,900), (1400,2000), (0,0,255)
+
         i += 1
         if not im_status or len(im_status[0]) == 0:
             print(f"No objects detected or tracked in frame {i}.")
-            global_map[i] = global_map[i - 1] if i > 1 else {}
+            #NOTE: if i > 1 else {} not necessary because initalize with 2 frames at beginning
+            global_map[i] = global_map[i - 1] #if i > 1 else {}
             cv2.imwrite(f"/root/ws/ultralytics/gui_data/frame_{i}.jpg", im)
             with open(f"/root/ws/ultralytics/gui_data/frame_{i}.json", "w") as f:
-                json.dump(global_map[i], f, indent=4)
+                json.dump(sort_data_keys({"data":global_map[i]}), f, indent=4)
             if save_img:
                 video_writer.write(im0)
             
@@ -234,6 +363,8 @@ def run(
             class_id = int(track.cls[0])  # Class ID
             class_name = model.names[class_id]
             is_inside = is_inside_region(line_points, bbox)
+            # if is_inside:
+                # im = draw_red_dot(im, bbox)
             val = {"id": obj_id, "inside": is_inside}
             # Initialize the list for the class_name key if it doesn't exist
             if class_name not in local_map:
@@ -241,8 +372,8 @@ def run(
             
             # Append the value to the class_name list
             local_map[class_name].append(val)
-
-
+            # print(">>>>>>>>>>>>>.local_map>>>>>>", local_map)
+        local_map_ = copy.deepcopy(local_map)
         global_map[i] = local_map #{"id": obj_id,  "inside": is_inside}#"class": class_name, "bbox": bbox,
         print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>",i)
         for class_name, item_list in global_map[i].items():
@@ -252,11 +383,13 @@ def run(
             total_items = len(item_list)  # Total number of items
             inside_true_count = sum(1 for item in item_list if item['inside'])  # Count where 'inside' is True #```if item['inside']```
             inside_false_count = sum(1 for item in item_list if not item['inside'])
+            #NOTE changes: inside_true_count >1 to inside_true_count >=1
+            # print(max_in_det)
             if inside_true_count >1 and inside_true_count>= max_in_det[class_name]:
                 
                 max_det = item_list#{class_name: item_list}#global_map[i]
                 max_det_[class_name] = max_det
-                print(f"class_name: {class_name}, max_det: {max_det_[class_name]}")
+                # print(f"class_name: {class_name}, max_det: {max_det_[class_name]}")
                 max_in_det[class_name] = inside_true_count
             else:
                 # Default behavior when condition is not satisfied
@@ -270,7 +403,7 @@ def run(
             max_det_ = update_max_det(max_det_, global_map[i])
             #Handle non-detected items 
             
-            print(">>>>>>>>Max_det>>>>", max_det_)
+            # print(">>>>>>>>Max_det>>>>", max_det_)
             if max_det_.get(class_name): 
                 # print(">>>>>>>>>",class_name, max_det_[class_name])
                 # print("<<<<<<<<<<<", global_map[i][class_name])
@@ -283,22 +416,24 @@ def run(
                     # print(f"$$$$$$$$$$$$$$$$$$$$$$ Frame: {i}, Class: {class_name} with: {new_items}")
                     global_map[i][class_name].extend(new_items)
                 # global_map[i][class_name].append(max_det_[class_name][-1])
+        
+        # keys_to_check = [
+        #                 "sponge", "woodspack","gauze", 
+        #                 "needle", "needle_holder", "forceps",
+        #             ]
+        keys_to_check = [
+                        # "gauze", 
+                        "needle", "forceps",
+                    ]
+        
 
+        for key in keys_to_check:
+            if key not in global_map[i] and i >= 1:
+                global_map[i][key] = global_map[i - 1][key]
 
-        if 'glove' not in global_map[i].keys() and i>=1:
-            global_map[i]["glove"] = global_map[i-1]["glove"] 
-        if 'sponge' not in global_map[i].keys() and i>=1:
-            global_map[i]["sponge"] = global_map[i-1]["sponge"]
-        if 'gauze' not in global_map[i].keys() and i>=1:
-            global_map[i]["gauze"] = global_map[i-1]["gauze"]
-        if 'woodspack' not in global_map[i].keys() and i>=1:
-            global_map[i]["woodspack"] = global_map[i-1]["woodspack"]
-        if 'needle' not in global_map[i].keys() and i>=1:
-            global_map[i]["needle"] = global_map[i-1]["needle"]
-
-        print("Before:",global_map[i])
+        # print("Before:",global_map[i])
         global_map[i] = filter_pred(global_map[i], global_map[i-1])
-        print("After:", global_map[i])
+        # print("After:", global_map[i])
             # except:
             #     print("going through pass***********************>>>>>>>")
             #     pass
@@ -311,10 +446,8 @@ def run(
                 #     global_map[i][class_name].extend(new_items)  # Append only the new items
             # if max_det.get(class_name):  # Ensure `class_name` exists in `max_det`
             #     global_map[i][class_name].append(list(max_det[class_name])[-1] if max_det[class_name] else None)
-        
-
         with open(f"/root/ws/ultralytics/gui_data/frame_{i}.json", "w") as f:
-            json.dump(global_map[i], f, indent=4)
+            json.dump(sort_data_keys({"data":global_map[i]}), f, indent=4)
 
         cv2.imwrite(f"/root/ws/ultralytics/gui_data/frame_{i}.jpg", im)
             
