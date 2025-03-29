@@ -782,7 +782,7 @@ class ObjectCounter:
         self,
         classes_names,
         reg_pts=None,
-        count_reg_color=(255, 0, 255),
+        count_reg_color=(0, 0, 255),
         count_txt_color=(0, 0, 0),
         count_bg_color=(255, 255, 255),
         line_thickness=2,
@@ -1008,7 +1008,8 @@ class ObjectCounter:
                 item_status = {"class_name": self.names[cls], "track_id": track_id}  # Reset for each track
                 
                 # Draw bounding box
-                self.annotator.box_label(box, label=f"{self.names[cls]}#{track_id}", color=colors(int(track_id), True))
+                #NOTE: not to draw box
+                # self.annotator.box_label(box, label=f"{self.names[cls]}", color=colors(int(track_id), True))
 
                 # Initialize class info if not present
                 if self.names[cls] not in self.class_wise_count:

@@ -6,14 +6,14 @@ import torch
 
 
 # Load a model
-model = YOLO("/mnt/data/weights/opervu_needle_dark_removed_27012025/opervu_needle_dark_removed_27012025_/weights/best.pt")
+model = YOLO("/mnt/data/weights/opervu_28SIs_07032025/opervu_28SIs_07032025_/weights/best.pt")
 
 
 print("Updatedmodelnames>>>>",model.names)
 validation_results = model.val(data="/mnt/data/dataset/YOLODataset/dataset.yaml", imgsz=2048, 
                                batch=1, conf=0.15, iou=0.25, 
                                device="0", plots = True,
-                               save_json= True, classes=[2]
+                               save_json= True, #classes=[2]
                                )
 
 
