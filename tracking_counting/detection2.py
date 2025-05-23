@@ -160,10 +160,10 @@ def track_position_change(roi, first_pt, last_pt):
     #         y_center + h/2   # Bottom
     #     )
         
-        # Create predefined region as a Shapely box
-        # region_box = box(xmin, ymin, xmax, ymax)
+    #     #Create predefined region as a Shapely box
+    #     region_box = box(xmin, ymin, xmax, ymax)
         
-        # return detection_box.intersects(region_box)
+    #     return detection_box.intersects(region_box)
 
     first_inside = is_inside(first_pt,xmin, xmax, ymin, ymax)
     last_inside  = is_inside(last_pt,xmin, xmax, ymin, ymax)
@@ -219,6 +219,12 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
     track_history = defaultdict(lambda: [])
     obj_history = defaultdict(list)
 
+    # New trackers for track length
+    max_track_length = defaultdict(int)            # confirmed maximum track length per key
+    current_candidate_max_track = defaultdict(int) # candidate maximum track length per key
+    consecutive_frames_track = defaultdict(int)    # consecutive frames count for track length candidates
+
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     fps    = 2                               # frames-per-second of your output video
     height, width = 2048, 2048#frame.shape[:2]           # e.g. from your first frame
@@ -227,10 +233,10 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
         ret, frame = cap.read()
         if not ret:
             break
-
+        track_status = {}
         # Perform inference
         results = model.predict(frame, conf=conf, iou=iou, imgsz=2080, verbose=False)
-        tracks = model.track(frame, persist=True, conf=0.15, iou=0.25, show=False, imgsz=2496, tracker="/home/opervu-user/opervu/ws/ultralytics/ultralytics/cfg/trackers/botsort.yaml")[0]
+        tracks = model.track(frame, persist=True, conf=0.5, iou=0.25, show=False, imgsz=2496, tracker="/home/opervu-user/opervu/ws/ultralytics/ultralytics/cfg/trackers/botsort.yaml")[0]
         if tracks.boxes is not None:
             boxes = tracks.boxes.xywh.cpu()
             classes = tracks.boxes.cls
@@ -240,7 +246,7 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
             
             x_min, x_max = 750, 1490-250
             y_min, y_max = 1040+250, 1740
-            margin = 5000
+            margin = 400
             max_track_len = 10
 
             # After updating track_history via your existing loop...
@@ -261,7 +267,9 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
                         track.pop(0)
 
             # Draw all trajectories from track_history
+            item_status = []
             for track_id, track in track_history.items():
+                
                 #NOTE:now 
                 # if len(track) < 2:
                 #     print(">>>>>", track)
@@ -277,8 +285,9 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
                     label = f"ID {track_id}"
                     x_lbl, y_lbl = pts[-1][0][0] + 5, pts[-1][0][1] - 5
                     first_pts, last_pts = pts[0], pts[-1]
-                    status = track_position_change((750, 1040+100, 1490-100, 1740), first_pts[0], last_pts[0]) #750, 1040, 1490, 1740
-
+                    status = track_position_change((x_min, y_min, x_max, y_max), first_pts[0], last_pts[0]) #750, 1040, 1490, 1740
+                    if status:
+                        item_status.append(status)
                     if status:
                         cv2.putText(frame, status+label, (x_lbl, y_lbl),
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,255,0), 2)
@@ -288,10 +297,10 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
 
             # Draw ROI
             cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2)
-
+            
             # Save or display
             out_tracking.write(frame)
-
+        track_status[model.names[13]] = item_status 
         # print(track.boxes.cls, track.boxes.data, track.boxes.id, track.boxes.xywh)
 
         # results_ = counter(frame)
@@ -308,11 +317,12 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
                                               image_width=frame_width, 
                                               image_height=frame_height)
                     
+                    
                     # Draw rectangle on frame
                     x_min, y_min, x_max, y_max = map(int, adjusted_bbox)
                     cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), 
                                 (0, 255, 0), 2)
-            
+
             for box in result.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy.cpu().numpy().squeeze())
                 
@@ -326,13 +336,14 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
         # Update maximum tracking logic
         for key in item_names.keys():
             current_count = items_count.get(key, 0)
-            
+            current_track_length = len(track_status.get(key, []))
             if current_candidate_max[key] > max_items_count[key]:
                 # We have an active candidate being verified
                 if current_count >= current_candidate_max[key]:
                     consecutive_frames_count[key] += 1
                     if consecutive_frames_count[key] >= 4:
                         # Update confirmed maximum
+                        print(">>>>>>", current_candidate_max[key], current_track_length)
                         max_items_count[key] = current_candidate_max[key]
                         # Reset tracking variables
                         current_candidate_max[key] = 0
@@ -347,8 +358,39 @@ def process_video(input_path, output_path, model_path, target_class=0, conf=0.25
                     current_candidate_max[key] = current_count
                     consecutive_frames_count[key] = 1
 
+            
+            # --- Update logic for track length ---
+            if current_candidate_max_track[key] > max_track_length[key]:
+                # Verifying an active track-length candidate
+                if current_track_length >= current_candidate_max_track[key]:
+                    consecutive_frames_track[key] += 1
+                    if consecutive_frames_track[key] >= 4:
+                        # Confirm new max track length
+                        # print(f"Tracks >>>>>> Candidate: {current_candidate_max_track[key]}, items: {current_count}")
+                        max_track_length[key] = current_candidate_max_track[key]
+                        # Reset track-length tracking
+                        current_candidate_max_track[key] = 0
+                        consecutive_frames_track[key] = 0
+                else:
+                    # Candidate failed verification
+                    current_candidate_max_track[key] = 0
+                    consecutive_frames_track[key] = 0
+            else:
+                # Detect new potential track-length max
+                if current_track_length > max_track_length[key]:
+                    current_candidate_max_track[key] = current_track_length
+                    consecutive_frames_track[key] = 1
+        #Uodate out_cont
+        print(">>>>",max_items_count["sponge"], max_track_length["sponge"])
 
-        frame = display_items_count(frame, max_items_count)
+
+        #Update max_item_count
+        for key in item_names.keys():
+            if max_items_count[key] or max_track_length[key]:
+                max_items_count[key] = max_items_count[key] - max_track_length[key]
+                max_track_length[key] =0
+        # print(track_status)
+        frame = display_items_count(frame, max_items_count, max_track_length)
 
         # Write processed frame
         out.write(frame)
